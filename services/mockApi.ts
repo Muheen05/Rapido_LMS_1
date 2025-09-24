@@ -1,0 +1,296 @@
+import { Agent, Audit, CoachingTip, LeaderboardEntry, DailyMission, SkillArea } from '../types';
+import getCoachingFromAI, { getDailyMissionFromAI } from './geminiService';
+
+// --- GOOGLE SHEETS CONFIGURATION ---
+const SPREADSHEET_ID = '1wQZ8TJad72KiS8dP4kS2XkOr82cTlHoLeTFlSt2rx28';
+
+// WARNING: Storing API keys in client-side code is a security risk.
+// This is for demonstration purposes only. In a production environment,
+// this key should be protected and calls should be made via a secure backend.
+const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
+
+const AGENTS_SHEET = 'Agents';
+const AUDITS_SHEET = 'Audits';
+const COACHING_TIPS_SHEET = 'CoachingTips';
+
+const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
+
+// --- DATA FETCHING & PARSING ---
+
+const toCamelCase = (s: string): string => {
+    if (!s) return '';
+    let str = s.replace(/\s+/g, '').replace(/^./, (match) => match.toLowerCase());
+    if (str.endsWith('ID')) {
+        str = str.slice(0, -2) + 'Id';
+    }
+    return str;
+};
+
+export const getSheetData = async <T>(sheetName: string): Promise<T[]> => {
+  if (!API_KEY) {
+    console.error("API_KEY is not configured. Cannot fetch live data.");
+    return [];
+  }
+
+  try {
+    const response = await fetch(`${BASE_URL}/values/${sheetName}?key=${API_KEY}`);
+    if (!response.ok) {
+      const errorData = await response.json();
+      const errorMessage = errorData?.error?.message || JSON.stringify(errorData);
+      console.error(`Failed to fetch sheet "${sheetName}". Status: ${response.status}. Message: ${errorMessage}`);
+      throw new Error(errorMessage);
+    }
+    const data = await response.json();
+    const values = data.values;
+    
+    if (!values || values.length < 2) {
+      console.warn(`Sheet "${sheetName}" is empty or has no data rows.`);
+      return [];
+    }
+
+    const originalHeaders = values[0].map((h: string) => h ? h.trim() : '');
+    const rows = values.slice(1);
+
+    const processedRows = rows.map((row: any[]) => {
+      const item: { [key: string]: any } = {};
+      const feedbackParts: string[] = [];
+
+      originalHeaders.forEach((header: string, index: number) => {
+        const rawValue = row[index];
+        if (rawValue === undefined || rawValue === null || rawValue === '') return;
+
+        const value = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
+        
+        if (sheetName === AUDITS_SHEET && header.toLowerCase().includes('feedback')) {
+            feedbackParts.push(String(value));
+            return;
+        }
+
+        const camelHeader = toCamelCase(header);
+        
+        if (camelHeader === 'agentEmail' || camelHeader === 'auditorEmail') {
+            item[camelHeader] = String(value).toLowerCase();
+        } else if (camelHeader.toLowerCase().includes('score')) {
+            item[camelHeader] = Number(value);
+        } else if (camelHeader === 'timestamp') {
+            const date = new Date(value);
+            item[camelHeader] = !isNaN(date.getTime()) ? date.toISOString() : null;
+        } else {
+            item[camelHeader] = value;
+        }
+      });
+      
+      if (sheetName === AUDITS_SHEET && feedbackParts.length > 0) {
+        item['feedback'] = feedbackParts.join('. ');
+      }
+      
+      if (sheetName === AUDITS_SHEET && (item['timestamp'] === null || !item['agentEmail'])) {
+          return null;
+      }
+
+      return item as T;
+    });
+    
+    return processedRows.filter(item => item !== null) as T[];
+
+  } catch (error) {
+    console.error(`Error fetching or parsing sheet: ${sheetName}`, error);
+    throw error;
+  }
+};
+
+// --- IN-MEMORY CACHE for SESSION DATA ---
+let audits: Audit[] = [];
+let coachingTips: CoachingTip[] = [];
+let isDataLoaded = false;
+let agents: Agent[] = [];
+
+const loadInitialData = async () => {
+  if (isDataLoaded) return;
+
+  const [loadedAgents, loadedAudits, loadedCoachingTips] = await Promise.all([
+    getSheetData<Agent>(AGENTS_SHEET),
+    getSheetData<Audit>(AUDITS_SHEET),
+    getSheetData<CoachingTip>(COACHING_TIPS_SHEET),
+  ]);
+
+  agents = loadedAgents;
+  audits = loadedAudits;
+  coachingTips = loadedCoachingTips;
+
+  const existingTipAuditIds = new Set(loadedCoachingTips.map(tip => tip.auditId));
+  const tipsToGeneratePromises: Promise<void>[] = [];
+
+  for (const audit of loadedAudits) {
+    if (audit.overallScore < 80 && audit.feedback && audit.auditId && !existingTipAuditIds.has(audit.auditId)) {
+      console.log(`Historical audit ${audit.auditId} has a low score. Generating AI coaching...`);
+      const promise = getCoachingFromAI(audit.feedback).then(async (tips) => {
+        if (tips && !tips.includes("Could not generate")) {
+          const newTip: CoachingTip = {
+            coachingId: `coach_retro_${audit.auditId || Date.now()}`,
+            auditId: audit.auditId,
+            generatedCoachingTips: tips,
+            timestamp: new Date().toISOString()
+          };
+          coachingTips.push(newTip);
+          // NOTE: Writing generated tips back to the sheet is not supported with a client-side API key.
+          // This requires a secure backend with OAuth 2.0 authentication.
+        }
+      });
+      tipsToGeneratePromises.push(promise);
+    }
+  }
+
+  await Promise.all(tipsToGeneratePromises);
+  isDataLoaded = true;
+};
+
+let initialDataPromise: Promise<void> | null = null;
+const ensureDataLoaded = () => {
+    if(!initialDataPromise) {
+        initialDataPromise = loadInitialData();
+    }
+    return initialDataPromise;
+}
+
+
+// --- API FUNCTIONS ---
+
+export const getAgentByEmail = async (email: string): Promise<Agent | undefined> => {
+    // This function is special and is called before the main data load.
+    const agentList = await getSheetData<Agent>(AGENTS_SHEET);
+     if (agentList.length === 0 && email) {
+        console.error("Login Check Failed: No agents were loaded from the 'Agents' sheet. Please check the following:\n1. The Google Sheet is shared as 'Anyone with the link can view'.\n2. The sheet tab is named exactly 'Agents' (case-sensitive).\n3. The sheet contains at least one agent row below the header.");
+    }
+    const foundAgent = agentList.find(a => a.agentEmail === email.toLowerCase().trim());
+    if(!foundAgent) {
+        console.error(`Login Check Failed: Email "${email}" was not found in the list of agents loaded from the sheet.`, { "Available emails": agentList.map(a => a.agentEmail) });
+    }
+    return foundAgent;
+};
+
+export const getAllAgents = async (): Promise<Agent[]> => {
+    await ensureDataLoaded();
+    return agents.filter(a => a.agentEmail !== 'auditor@rapido.com');
+};
+
+export const getDashboardData = async (agentEmail: string): Promise<{ audits: Audit[], coaching: CoachingTip[] }> => {
+  await ensureDataLoaded();
+  
+  const normalizedAgentEmail = agentEmail.toLowerCase().trim();
+  const agentAudits = audits
+    .filter(audit => audit.agentEmail === normalizedAgentEmail)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  
+  const agentAuditIds = new Set(agentAudits.map(a => a.auditId));
+  
+  const agentCoaching = coachingTips
+    .filter(tip => tip.auditId && agentAuditIds.has(tip.auditId))
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  
+  return { audits: agentAudits, coaching: agentCoaching };
+};
+
+export const getLeaderboardData = async (): Promise<LeaderboardEntry[]> => {
+  await ensureDataLoaded();
+
+  const agentMap = new Map(agents.map(a => [a.agentEmail, a.agentName]));
+  const agentScores: { [key: string]: { totalScore: number, count: number, name: string } } = {};
+
+  audits.forEach(audit => {
+    const agentName = agentMap.get(audit.agentEmail) || 'Unknown Agent';
+    if (!agentScores[audit.agentEmail]) {
+      agentScores[audit.agentEmail] = { totalScore: 0, count: 0, name: agentName };
+    }
+    agentScores[audit.agentEmail].totalScore += audit.overallScore;
+    agentScores[audit.agentEmail].count++;
+  });
+  
+  const leaderboard = Object.values(agentScores).map(data => ({
+    agentName: data.name,
+    averageScore: parseFloat((data.totalScore / data.count).toFixed(2)),
+    auditsCompleted: data.count,
+    rank: 0,
+  })).sort((a, b) => b.averageScore - a.averageScore || b.auditsCompleted - a.auditsCompleted);
+  
+  leaderboard.forEach((entry, index) => { entry.rank = index + 1; });
+  return leaderboard;
+};
+
+export const submitNewAudit = async (auditData: Omit<Audit, 'auditId' | 'timestamp'>): Promise<Audit> => {
+  await ensureDataLoaded();
+
+  const newAudit: Audit = {
+    ...auditData,
+    agentEmail: auditData.agentEmail.toLowerCase().trim(),
+    auditId: `aud_local_${Date.now()}`,
+    timestamp: new Date().toISOString()
+  };
+  audits.unshift(newAudit);
+
+  if (newAudit.overallScore < 80 && newAudit.feedback) {
+    console.log("Score is below threshold, generating AI coaching...");
+    const tips = await getCoachingFromAI(newAudit.feedback);
+    const newCoachingTip: CoachingTip = {
+        coachingId: `coach_local_${Date.now()}`,
+        auditId: newAudit.auditId,
+        generatedCoachingTips: tips,
+        timestamp: new Date().toISOString()
+    };
+    coachingTips.unshift(newCoachingTip);
+    console.log("AI Coaching tips saved to session:", newCoachingTip);
+  }
+
+  // NOTE: The new AUDIT and coaching tips are not saved back to the sheet.
+  // This requires a secure backend with OAuth 2.0 authentication.
+
+  return newAudit;
+};
+
+
+export const getSkillUpData = async (agentEmail: string): Promise<{
+    missionData: { mission: DailyMission; skills: SkillArea[] } | null;
+    yesterdayScore: number | null;
+    rankData: { currentRank: number; agentAbove: LeaderboardEntry | null };
+}> => {
+    await ensureDataLoaded();
+    const normalizedEmail = agentEmail.toLowerCase().trim();
+
+    // 1. Get Yesterday's Audits
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+
+    const yesterdayAudits = audits.filter(audit => {
+        const auditDate = new Date(audit.timestamp);
+        return audit.agentEmail === normalizedEmail && auditDate >= yesterday && auditDate < today;
+    });
+
+    // 2. Calculate Yesterday's Score
+    let yesterdayScore: number | null = null;
+    if (yesterdayAudits.length > 0) {
+        const total = yesterdayAudits.reduce((acc, a) => acc + a.overallScore, 0);
+        yesterdayScore = parseFloat((total / yesterdayAudits.length).toFixed(2));
+    }
+
+    // 3. Get AI Mission
+    const missionData = await getDailyMissionFromAI(yesterdayAudits);
+
+    // 4. Get Rank Data
+    const leaderboard = await getLeaderboardData();
+    const agentName = agents.find(a => a.agentEmail === normalizedEmail)?.agentName;
+    const agentRankEntry = leaderboard.find(e => e.agentName === agentName);
+    const currentRank = agentRankEntry ? agentRankEntry.rank : 0;
+    
+    let agentAbove: LeaderboardEntry | null = null;
+    if(currentRank > 1) {
+        agentAbove = leaderboard.find(e => e.rank === currentRank - 1) || null;
+    }
+
+    return {
+        missionData,
+        yesterdayScore,
+        rankData: { currentRank, agentAbove },
+    };
+};

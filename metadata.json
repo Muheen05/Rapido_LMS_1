@@ -1,0 +1,5 @@
+{
+  "name": "Rapido Agent LMS",
+  "description": "A Dynamic Agent Learning Management System for Rapido, providing performance tracking, AI-powered coaching, and leaderboards to help agents improve.",
+  "requestFramePermissions": []
+}
