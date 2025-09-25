@@ -42,8 +42,11 @@ const SkillUpView: React.FC = () => {
     const [missionData, setMissionData] = useState<{ mission: DailyMission; skills: SkillArea[] } | null>(null);
     const [journeyData, setJourneyData] = useState<JourneyMilestone[]>([]);
     const [rankData, setRankData] = useState<{ currentRank: number; agentAbove: LeaderboardEntry | null } | null>(null);
+    const [hasAuditsFromYesterday, setHasAuditsFromYesterday] = useState(false);
     const [loading, setLoading] = useState(true);
     const [selectedReward, setSelectedReward] = useState<MilestoneReward | null>(null);
+    const [missionError, setMissionError] = useState<string | null>(null);
+
 
     useEffect(() => {
         const fetchData = async () => {
@@ -53,6 +56,8 @@ const SkillUpView: React.FC = () => {
                 setMissionData(data.missionData);
                 setRankData(data.rankData);
                 setJourneyData(data.journeyData);
+                setHasAuditsFromYesterday(data.hasAuditsFromYesterday);
+                setMissionError(data.missionError);
                 setLoading(false);
             }
         };
@@ -71,10 +76,18 @@ const SkillUpView: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                {missionData ? (
+                {(missionData || missionError) ? (
                     <>
                         <div className="lg:col-span-2 space-y-8">
-                           <DailyQuestCard mission={missionData.mission} />
+                            {missionData ? <DailyQuestCard mission={missionData.mission} /> :
+                             <div className="bg-white p-6 rounded-xl border border-slate-200">
+                                <h2 className="text-xl font-bold text-red-600">Mission Generation Failed</h2>
+                                <p className="text-slate-500 mt-2">
+                                    There was a problem generating your AI-powered mission. Please ensure the API key is correct and has the 'Vertex AI API' enabled in your Google Cloud Console.
+                                </p>
+                                <code className="block bg-slate-100 text-red-700 text-xs p-3 rounded-md mt-4 text-left">{missionError}</code>
+                            </div>
+                            }
                            <InfoCard title="Leaderboard Target" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>}>
                                 {rankData && rankData.agentAbove ? (
                                     <p className="text-md text-slate-600">You're rank <span className="font-bold text-primary">{rankData.currentRank}</span>. Overtake <span className="font-bold text-primary">{rankData.agentAbove.agentName}</span> to climb the leaderboard!</p>
@@ -84,15 +97,26 @@ const SkillUpView: React.FC = () => {
                             </InfoCard>
                         </div>
                         <div className="space-y-8">
-                             <InfoCard title="Core Competencies" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M12 6V3m0 18v-3" /></svg>}>
-                                <SkillRadarChart skills={missionData.skills} />
-                            </InfoCard>
+                            {missionData && (
+                                <InfoCard title="Core Competencies" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M12 6V3m0 18v-3" /></svg>}>
+                                    <SkillRadarChart skills={missionData.skills} />
+                                </InfoCard>
+                            )}
                         </div>
                     </>
                 ) : (
                     <div className="text-center bg-white p-10 rounded-xl border border-slate-200 col-span-3">
-                        <h1 className="text-2xl font-bold text-slate-800">Ready for a New Mission?</h1>
-                        <p className="text-slate-500 mt-2">No audits were found from yesterday. Complete today's work, and your new AI-powered mission will be generated tomorrow!</p>
+                        {hasAuditsFromYesterday ? (
+                             <>
+                                <h1 className="text-2xl font-bold text-amber-600">Mission Analysis Incomplete</h1>
+                                <p className="text-slate-500 mt-2">The AI couldn't formulate a mission from yesterday's data. This can sometimes happen with ambiguous feedback or if the AI service is temporarily unavailable.</p>
+                            </>
+                        ) : (
+                            <>
+                                <h1 className="text-2xl font-bold text-slate-800">Ready for a New Mission?</h1>
+                                <p className="text-slate-500 mt-2">No audits were found from yesterday. Complete today's work, and your new AI-powered mission will be generated tomorrow!</p>
+                            </>
+                        )}
                     </div>
                 )}
             </div>

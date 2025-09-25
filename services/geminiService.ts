@@ -2,8 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Audit } from '../types';
 
 // Hardcoded API key to ensure functionality in simple local environments
-// This key is unified with the Sheets API key for simplicity.
-// Ensure the Google Cloud project for this key has both Sheets API and Vertex AI API enabled.
+// This is the unified key that must have both Sheets and Vertex AI APIs enabled.
 const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
@@ -27,9 +26,10 @@ Based *only* on this feedback, provide 3 specific, actionable, and constructive 
     });
 
     return response.text;
-  } catch (error) {
-    console.error("Error calling Gemini API:", error);
-    return "Could not generate coaching tips due to an error.";
+  } catch (error: any) {
+    const message = error?.message || JSON.stringify(error);
+    console.error("Error calling Gemini API for coaching:", message);
+    throw new Error(`Gemini API Error: ${message}`);
   }
 };
 
@@ -84,9 +84,10 @@ export const getDailyMissionFromAI = async (audits: Audit[]): Promise<{ mission:
     const jsonText = response.text.trim();
     return JSON.parse(jsonText);
 
-  } catch (error) {
-      console.error("Error generating daily mission from AI:", error);
-      return null;
+  } catch (error: any) {
+      const message = error?.message || JSON.stringify(error);
+      console.error("Error generating daily mission from AI:", message);
+      throw new Error(`Gemini API Error: ${message}`);
   }
 }
 
@@ -99,9 +100,10 @@ export const getAIProTip = async (milestoneTitle: string): Promise<string> => {
             contents: prompt,
         });
         return response.text;
-    } catch (error) {
-        console.error("Error generating AI pro tip:", error);
-        return "Could not generate a pro tip at this time.";
+    } catch (error: any) {
+        const message = error?.message || JSON.stringify(error);
+        console.error("Error generating AI pro tip:", message);
+        throw new Error(`Gemini API Error: ${message}`);
     }
 };
 

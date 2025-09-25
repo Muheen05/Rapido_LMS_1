@@ -61,6 +61,8 @@ const DashboardView: React.FC = () => {
     ? Math.max(...audits.map(a => a.overallScore)).toFixed(2) 
     : 'N/A';
 
+  const hasLowScores = audits.some(audit => audit.overallScore < 80);
+
   if (loading) {
       return <LoadingSkeleton />;
   }
@@ -116,7 +118,7 @@ const DashboardView: React.FC = () => {
 
         <div className="lg:col-span-1">
             <h2 className="text-xl font-bold mb-4 text-slate-800">AI Coaching Feed</h2>
-            <CoachingFeed coachingTips={coaching} audits={audits} />
+            <CoachingFeed coachingTips={coaching} audits={audits} hasLowScores={hasLowScores} />
         </div>
       </div>
     </div>

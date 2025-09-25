@@ -5,6 +5,7 @@ import getCoachingFromAI, { getDailyMissionFromAI, getAIProTip } from './geminiS
 const SPREADSHEET_ID = '1wQZ8TJad72KiS8dP4kS2XkOr82cTlHoLeTFlSt2rx28';
 
 // Hardcoded API key to ensure functionality in simple local environments
+// This key must have both Sheets and Vertex AI APIs enabled.
 const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
 
 const AGENTS_SHEET = 'Agents';
@@ -116,19 +117,23 @@ const loadInitialData = async () => {
 
   for (const audit of loadedAudits) {
     if (audit.overallScore < 80 && audit.feedback && audit.auditId && !existingTipAuditIds.has(audit.auditId)) {
-      console.log(`Historical audit ${audit.auditId} has a low score. Generating AI coaching...`);
       const promise = getCoachingFromAI(audit.feedback).then(async (tips) => {
-        if (tips && !tips.includes("Could not generate")) {
-          const newTip: CoachingTip = {
-            coachingId: `coach_retro_${audit.auditId || Date.now()}`,
-            auditId: audit.auditId,
-            generatedCoachingTips: tips,
-            timestamp: new Date().toISOString()
+        const newTip: CoachingTip = {
+          coachingId: `coach_retro_${audit.auditId || Date.now()}`,
+          auditId: audit.auditId,
+          generatedCoachingTips: tips,
+          timestamp: new Date().toISOString()
+        };
+        coachingTips.push(newTip);
+      }).catch(error => {
+          console.error(`Failed to generate tips for historical audit ${audit.auditId}:`, error);
+          const errorTip: CoachingTip = {
+              coachingId: `err_retro_${audit.auditId || Date.now()}`,
+              auditId: audit.auditId,
+              generatedCoachingTips: `ERROR: ${error.message}`,
+              timestamp: new Date().toISOString()
           };
-          coachingTips.push(newTip);
-          // NOTE: Writing generated tips back to the sheet is not supported with a client-side API key.
-          // This requires a secure backend with OAuth 2.0 authentication.
-        }
+          coachingTips.push(errorTip);
       });
       tipsToGeneratePromises.push(promise);
     }
@@ -223,27 +228,35 @@ export const submitNewAudit = async (auditData: Omit<Audit, 'auditId' | 'timesta
 
   if (newAudit.overallScore < 80 && newAudit.feedback) {
     console.log("Score is below threshold, generating AI coaching...");
-    const tips = await getCoachingFromAI(newAudit.feedback);
-    const newCoachingTip: CoachingTip = {
-        coachingId: `coach_local_${Date.now()}`,
-        auditId: newAudit.auditId,
-        generatedCoachingTips: tips,
-        timestamp: new Date().toISOString()
-    };
-    coachingTips.unshift(newCoachingTip);
-    console.log("AI Coaching tips saved to session:", newCoachingTip);
+    try {
+        const tips = await getCoachingFromAI(newAudit.feedback);
+        const newCoachingTip: CoachingTip = {
+            coachingId: `coach_local_${Date.now()}`,
+            auditId: newAudit.auditId,
+            generatedCoachingTips: tips,
+            timestamp: new Date().toISOString()
+        };
+        coachingTips.unshift(newCoachingTip);
+    } catch (error: any) {
+        console.error("Failed to generate tips for new audit:", error);
+        const errorTip: CoachingTip = {
+            coachingId: `err_local_${Date.now()}`,
+            auditId: newAudit.auditId,
+            generatedCoachingTips: `ERROR: ${error.message}`,
+            timestamp: new Date().toISOString()
+        };
+        coachingTips.unshift(errorTip);
+    }
   }
-
-  // NOTE: The new AUDIT and coaching tips are not saved back to the sheet.
-  // This requires a secure backend with OAuth 2.0 authentication.
-
   return newAudit;
 };
 
 
 export const getSkillUpData = async (agentEmail: string): Promise<{
     missionData: { mission: DailyMission; skills: SkillArea[] } | null;
+    missionError: string | null;
     yesterdayScore: number | null;
+    hasAuditsFromYesterday: boolean;
     rankData: { currentRank: number; agentAbove: LeaderboardEntry | null };
     journeyData: JourneyMilestone[];
 }> => {
@@ -261,12 +274,22 @@ export const getSkillUpData = async (agentEmail: string): Promise<{
         return auditDate >= yesterday && auditDate < today;
     });
     
+    const hasAuditsFromYesterday = yesterdayAudits.length > 0;
     let yesterdayScore: number | null = null;
     if (yesterdayAudits.length > 0) {
         const total = yesterdayAudits.reduce((acc, a) => acc + a.overallScore, 0);
         yesterdayScore = parseFloat((total / yesterdayAudits.length).toFixed(2));
     }
-    const missionData = await getDailyMissionFromAI(yesterdayAudits);
+    
+    let missionData = null;
+    let missionError: string | null = null;
+    try {
+        missionData = await getDailyMissionFromAI(yesterdayAudits);
+    } catch (error: any) {
+        console.error("Failed to get daily mission:", error);
+        missionError = error.message;
+    }
+
 
     // 2. Get Rank Data
     const leaderboard = await getLeaderboardData();
@@ -307,13 +330,20 @@ export const getSkillUpData = async (agentEmail: string): Promise<{
     // 4. Get AI Pro Tip for the latest unlocked milestone
     const lastUnlockedMilestone = [...journeyMilestones].reverse().find(m => m.isUnlocked);
     if(lastUnlockedMilestone) {
-        const proTip = await getAIProTip(lastUnlockedMilestone.name);
-        lastUnlockedMilestone.reward = { title: `Pro-Tip for a ${lastUnlockedMilestone.name}`, proTip };
+        try {
+            const proTip = await getAIProTip(lastUnlockedMilestone.name);
+            lastUnlockedMilestone.reward = { title: `Pro-Tip for a ${lastUnlockedMilestone.name}`, proTip };
+        } catch (error: any) {
+            console.error("Failed to get pro tip:", error);
+            lastUnlockedMilestone.reward = { title: `Pro-Tip for a ${lastUnlockedMilestone.name}`, proTip: `Could not generate pro-tip. Details: ${error.message}` };
+        }
     }
 
     return {
         missionData,
+        missionError,
         yesterdayScore,
+        hasAuditsFromYesterday,
         rankData: { currentRank, agentAbove },
         journeyData: journeyMilestones,
     };
