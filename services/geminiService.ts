@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Audit } from '../types';
 
 // Hardcoded API key to ensure functionality in simple local environments
-const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
+const API_KEY = "AIzaSyABfTIyvf7Lg76Z3yEy2ahua4LXa8oM2mE";
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
