@@ -3,7 +3,7 @@ import { Audit } from '../types';
 
 // Hardcoded API key to ensure functionality in simple local environments
 // This is the unified key that must have both Sheets and Vertex AI APIs enabled.
-const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
+const API_KEY = "AIzaSyCGeJ3ktJ47RCQHkw5DLmR36W3-zXqXbMw";
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 

@@ -2,11 +2,11 @@ import { Agent, Audit, CoachingTip, LeaderboardEntry, DailyMission, SkillArea, J
 import getCoachingFromAI, { getDailyMissionFromAI, getAIProTip } from './geminiService';
 
 // --- GOOGLE SHEETS CONFIGURATION ---
-const SPREADSHEET_ID = '1wQZ8TJad72KiS8dP4kS2XkOr82cTlHoLeTFlSt2rx28';
+const SPREADSHEET_ID = '1bseOiESt4O9fQpAW6D4Z8AyarC_OknEk12ohDBWtwNA';
 
 // Hardcoded API key to ensure functionality in simple local environments
 // This key must have both Sheets and Vertex AI APIs enabled.
-const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
+const API_KEY = "AIzaSyCGeJ3ktJ47RCQHkw5DLmR36W3-zXqXbMw";
 
 const AGENTS_SHEET = 'Agents';
 const AUDITS_SHEET = 'Audits';
