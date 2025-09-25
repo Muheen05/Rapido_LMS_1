@@ -39,3 +39,18 @@ export interface SkillArea {
     skill: string;
     score: number;
 }
+
+export interface MilestoneReward {
+    title: string;
+    proTip: string;
+}
+
+export interface JourneyMilestone {
+    name: string;
+    description: string;
+    quest: string;
+    icon: string; // Could be an emoji or an SVG path
+    isUnlocked: boolean;
+    unlocksAt: number; // e.g., number of audits, or average score
+    reward?: MilestoneReward;
+}

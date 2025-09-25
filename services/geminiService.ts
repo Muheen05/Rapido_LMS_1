@@ -1,19 +1,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Audit } from '../types';
 
-// WARNING: Storing API keys in client-side code is a security risk.
-// This is for demonstration purposes only. In a production environment,
-// this key should be managed via a secure backend service.
-const API_KEY = "AIzaSyABfTIyvf7Lg76Z3yEy2ahua4LXa8oM2mE";
+// Hardcoded API key to ensure functionality in simple local environments
+const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 const getCoachingFromAI = async (feedbackText: string): Promise<string> => {
-  if (!API_KEY) {
-    console.error("API_KEY is not set. Cannot call AI service.");
-    return "AI service is currently unavailable. Please check configuration.";
-  }
-
   try {
     const prompt = `You are an expert customer support coach for a mobility platform called Rapido. An agent has just received the following feedback on a customer interaction where they scored below the target:
 ---
@@ -40,11 +33,6 @@ Based *only* on this feedback, provide 3 specific, actionable, and constructive 
 
 
 export const getDailyMissionFromAI = async (audits: Audit[]): Promise<{ mission: any; skills: any; } | null> => {
-  if (!API_KEY) {
-    console.error("API_KEY is not set. Cannot call AI service.");
-    return null;
-  }
-  
   if (audits.length === 0) {
     return null;
   }
@@ -99,6 +87,21 @@ export const getDailyMissionFromAI = async (audits: Audit[]): Promise<{ mission:
       return null;
   }
 }
+
+export const getAIProTip = async (milestoneTitle: string): Promise<string> => {
+    const prompt = `You are an elite performance coach for customer support agents. An agent has just unlocked a significant milestone in their career called "${milestoneTitle}". Generate one advanced, "pro-level" tip related to this milestone that they can use to further elevate their skills. The tip should be insightful, concise, and motivational.`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text;
+    } catch (error) {
+        console.error("Error generating AI pro tip:", error);
+        return "Could not generate a pro tip at this time.";
+    }
+};
 
 
 export default getCoachingFromAI;

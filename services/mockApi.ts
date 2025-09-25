@@ -1,12 +1,10 @@
-import { Agent, Audit, CoachingTip, LeaderboardEntry, DailyMission, SkillArea } from '../types';
-import getCoachingFromAI, { getDailyMissionFromAI } from './geminiService';
+import { Agent, Audit, CoachingTip, LeaderboardEntry, DailyMission, SkillArea, JourneyMilestone } from '../types';
+import getCoachingFromAI, { getDailyMissionFromAI, getAIProTip } from './geminiService';
 
 // --- GOOGLE SHEETS CONFIGURATION ---
 const SPREADSHEET_ID = '1wQZ8TJad72KiS8dP4kS2XkOr82cTlHoLeTFlSt2rx28';
 
-// WARNING: Storing API keys in client-side code is a security risk.
-// This is for demonstration purposes only. In a production environment,
-// this key should be protected and calls should be made via a secure backend.
+// Hardcoded API key to ensure functionality in simple local environments
 const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
 
 const AGENTS_SHEET = 'Agents';
@@ -27,11 +25,6 @@ const toCamelCase = (s: string): string => {
 };
 
 export const getSheetData = async <T>(sheetName: string): Promise<T[]> => {
-  if (!API_KEY) {
-    console.error("API_KEY is not configured. Cannot fetch live data.");
-    return [];
-  }
-
   try {
     const response = await fetch(`${BASE_URL}/values/${sheetName}?key=${API_KEY}`);
     if (!response.ok) {
@@ -252,45 +245,76 @@ export const getSkillUpData = async (agentEmail: string): Promise<{
     missionData: { mission: DailyMission; skills: SkillArea[] } | null;
     yesterdayScore: number | null;
     rankData: { currentRank: number; agentAbove: LeaderboardEntry | null };
+    journeyData: JourneyMilestone[];
 }> => {
     await ensureDataLoaded();
     const normalizedEmail = agentEmail.toLowerCase().trim();
+    const allAgentAudits = audits.filter(a => a.agentEmail === normalizedEmail);
 
-    // 1. Get Yesterday's Audits
+    // 1. Get Yesterday's Audits for Daily Mission
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
-
-    const yesterdayAudits = audits.filter(audit => {
+    const yesterdayAudits = allAgentAudits.filter(audit => {
         const auditDate = new Date(audit.timestamp);
-        return audit.agentEmail === normalizedEmail && auditDate >= yesterday && auditDate < today;
+        return auditDate >= yesterday && auditDate < today;
     });
-
-    // 2. Calculate Yesterday's Score
+    
     let yesterdayScore: number | null = null;
     if (yesterdayAudits.length > 0) {
         const total = yesterdayAudits.reduce((acc, a) => acc + a.overallScore, 0);
         yesterdayScore = parseFloat((total / yesterdayAudits.length).toFixed(2));
     }
-
-    // 3. Get AI Mission
     const missionData = await getDailyMissionFromAI(yesterdayAudits);
 
-    // 4. Get Rank Data
+    // 2. Get Rank Data
     const leaderboard = await getLeaderboardData();
     const agentName = agents.find(a => a.agentEmail === normalizedEmail)?.agentName;
     const agentRankEntry = leaderboard.find(e => e.agentName === agentName);
     const currentRank = agentRankEntry ? agentRankEntry.rank : 0;
-    
     let agentAbove: LeaderboardEntry | null = null;
     if(currentRank > 1) {
         agentAbove = leaderboard.find(e => e.rank === currentRank - 1) || null;
+    }
+    
+    // 3. Define and Process Agent Journey for the CURRENT MONTH
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthlyAudits = allAgentAudits.filter(a => new Date(a.timestamp) >= startOfMonth);
+
+    const totalAuditsThisMonth = monthlyAudits.length;
+    
+    let journeyMilestones: JourneyMilestone[] = [
+        { name: "Quality Rookie", description: "Completed your first 5 quality audits.", quest: "Complete 5 audits", icon: "🚀", unlocksAt: 5, isUnlocked: totalAuditsThisMonth >= 5 },
+        { name: "Consistency Champion", description: "Maintained an average score of 85%+ over 10 audits.", quest: "Maintain 85%+ average", icon: "🏆", unlocksAt: 10, isUnlocked: false },
+        { name: "Feedback Virtuoso", description: "Received positive feedback on 15 audits.", quest: "15 positive feedback audits", icon: "✨", unlocksAt: 15, isUnlocked: false },
+        { name: "Elite Performer", description: "Achieved a 95%+ score on 5 separate audits.", quest: "5 audits with 95%+ score", icon: "💎", unlocksAt: 25, isUnlocked: false },
+    ];
+    
+    // Calculate progress for more complex milestones using this month's data
+    if(totalAuditsThisMonth >= 10) {
+        const recent10Audits = monthlyAudits.slice(0, 10);
+        const avgScore = recent10Audits.reduce((acc, a) => acc + a.overallScore, 0) / recent10Audits.length;
+        if(avgScore >= 85) journeyMilestones[1].isUnlocked = true;
+    }
+    const positiveFeedbackCount = monthlyAudits.filter(a => a.overallScore >= 80).length;
+    if(positiveFeedbackCount >= 15) journeyMilestones[2].isUnlocked = true;
+
+    const eliteScoreCount = monthlyAudits.filter(a => a.overallScore >= 95).length;
+    if(eliteScoreCount >= 5) journeyMilestones[3].isUnlocked = true;
+
+    // 4. Get AI Pro Tip for the latest unlocked milestone
+    const lastUnlockedMilestone = [...journeyMilestones].reverse().find(m => m.isUnlocked);
+    if(lastUnlockedMilestone) {
+        const proTip = await getAIProTip(lastUnlockedMilestone.name);
+        lastUnlockedMilestone.reward = { title: `Pro-Tip for a ${lastUnlockedMilestone.name}`, proTip };
     }
 
     return {
         missionData,
         yesterdayScore,
         rankData: { currentRank, agentAbove },
+        journeyData: journeyMilestones,
     };
 };
