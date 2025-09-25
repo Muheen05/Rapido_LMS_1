@@ -2,7 +2,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Audit } from '../types';
 
 // Hardcoded API key to ensure functionality in simple local environments
-const API_KEY = "AIzaSyABfTIyvf7Lg76Z3yEy2ahua4LXa8oM2mE";
+// This key is unified with the Sheets API key for simplicity.
+// Ensure the Google Cloud project for this key has both Sheets API and Vertex AI API enabled.
+const API_KEY = "AIzaSyAXisyKMgnofnRfbf4023za1apjw2T6Vcs";
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
